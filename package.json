@@ -14,9 +14,9 @@
 		"express": "^4.17.1",
 		"moment-timezone": "^0.5.33",
 		"node-telegram-bot-api": "^0.53.0",
-		"ws": "^7.5.1"
+		"socks5-https-client": "^1.2.1"
 	},
 	"devDependencies": {
-		"socks5-https-client": "^1.2.1"
+		"node-fetch": "^2.6.1"
 	}
 }

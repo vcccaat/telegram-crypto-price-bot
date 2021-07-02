@@ -1,26 +1,19 @@
 const express = require('express');
 const TelegramBot = require('node-telegram-bot-api');
-const Binance = require('binance-api-node');
+const Binance = require('binance-api-node').default;
 const Agent = require('socks5-https-client/lib/Agent');
-const WebSocket = require('ws');
+const packageInfo = require('./package.json');
 
 require('dotenv').config();
-const ws = new WebSocket(`wss://stream.binance.com:9443/ws`);
-
-const app = express();
-app.listen(process.env.PORT);
-
-const binanceClient = Binance.default({
-	apiKey: process.env.BINANCE_API_KEY,
-	apiSecret: process.env.BINANCE_API_SECRET,
-});
 
 let bot;
+const TELEGRAMM_BOT_TOKEN = process.env.TELEGRAMM_BOT_TOKEN;
+
 if (process.env.NODE_ENV === 'prod') {
-	bot = new TelegramBot(process.env.TELEGRAMM_BOT_TOKEN);
-	bot.setWebHook(process.env.HEROKU_URL + bot.token);
+	bot = new TelegramBot(TELEGRAMM_BOT_TOKEN);
+	bot.setWebHook(process.env.HEROKU_URL + TELEGRAMM_BOT_TOKEN);
 } else {
-	bot = new TelegramBot(process.env.TELEGRAMM_BOT_TOKEN, {
+	bot = new TelegramBot(TELEGRAMM_BOT_TOKEN, {
 		polling: true,
 		request: {
 			agentClass: Agent,
@@ -32,6 +25,32 @@ if (process.env.NODE_ENV === 'prod') {
 	});
 }
 
+const app = express();
+const port = process.env.PORT || 5000;
+app.use(express.json());
+
+app.get('/', (req, res) => {
+	res.json({ version: packageInfo.version });
+});
+
+// receiving updates at the route below
+app.post(`/${TELEGRAMM_BOT_TOKEN}`, (req, res) => {
+	bot.processUpdate(req.body);
+	res.sendStatus(200);
+});
+
+app.listen(port, () => {
+	console.log(`Express server is listening on ${port}`);
+});
+
+// only need for order request
+// const binanceClient = Binance({
+// 	apiKey: process.env.BINANCE_API_KEY,
+// 	apiSecret: process.env.BINANCE_API_SECRET,
+// });
+
+const binanceClient = Binance();
+
 const formatMoney = (value, currency = 'USD', locale = 'en-US') => {
 	return Intl.NumberFormat(locale, {
 		style: 'currency',
@@ -40,28 +59,58 @@ const formatMoney = (value, currency = 'USD', locale = 'en-US') => {
 	}).format(value);
 };
 
-let tokenTarget = {};
-
-// telegram bot
+// starter
 bot.on('message', (msg) => {
 	const chatId = msg.chat.id;
 
 	switch (msg.text) {
 		case '/start':
-			bot.sendMessage(chatId, 'Yoo!');
+			bot.sendMessage(
+				chatId,
+				`Instructions\n\n🔹 /price BTC      check current price \n\n🔹 /target     set a price alert \n\n🔹 /alerts      display all active alerts`
+			);
 			break;
+
+		case '/target': //set crypto target price
+			const opts = {
+				reply_markup: JSON.stringify({
+					inline_keyboard: [
+						[
+							{ text: 'BTC', callback_data: 'BTC' },
+							{ text: 'ETH', callback_data: 'ETH' },
+						],
+					],
+				}),
+			};
+			bot.sendMessage(
+				chatId,
+				'Please select the coin you want to track.',
+				opts
+			);
+			break;
+		case '/alerts': //check active alerts
+			let record = ``;
+			for (r of alertsRecord) {
+				record += `🔴 Target `;
+				for (item of r) {
+					record += item + ` `;
+				}
+				record += `\n\n`;
+			}
+			if (record) {
+				bot.sendMessage(chatId, record);
+			}
 
 		default:
 			break;
 	}
 });
 
+// check current price of a crypto token
 bot.onText(/\/price (.+)/, (msg, data) => {
 	const chatId = msg.chat.id;
 	const cryptoToken1 = data[1];
 	const cryptoToken2 = 'USDT';
-
-	bot.sendMessage(chatId, 'Wait...');
 
 	binanceClient
 		.avgPrice({ symbol: `${cryptoToken1}${cryptoToken2}`.toUpperCase() }) // example, { symbol: "BTCUSTD" }
@@ -76,66 +125,103 @@ bot.onText(/\/price (.+)/, (msg, data) => {
 		);
 });
 
-let globalChatId
-bot.onText(/\/target (.+)/, (msg, data) => {
-	const chatId = msg.chat.id;
-  globalChatId = chatId
-	const [token, direction, targetPrice] = data[1].split(' ');
-	const tokenSymbol = token.toLowerCase();
-	const sentence =
-		'Done. This bot will send price alert when ' +
-		tokenSymbol.toUpperCase() +
-		' ' +
-		direction +
-		' $' +
-		targetPrice;
-	bot.sendMessage(chatId, sentence);
-
-	tokenTarget[tokenSymbol] = [direction, targetPrice];
-
-  const ticker = tokenSymbol + 'usdt@trade';
-  const wsMsg = {
-    method: 'SUBSCRIBE',
-    params: [ticker],
-    id: 1,
-  };
-  ws.onopen = () =>{
-    ws.send(JSON.stringify(wsMsg));
-  }
-
-  
-
-});
-
-app.post('/' + bot.token, (req, res) => {
-	bot.processUpdate(req.body);
-	res.sendStatus(200);
-});
+let alertsRecord = [];
 
 
+// inline button callback
+bot.on('callback_query', (cb) => {
+	const content = cb.data;
+	const initial = () => {
+		const opts = {
+			reply_markup: JSON.stringify({
+				inline_keyboard: [
+					[
+						{ text: 'BTC', callback_data: 'BTC' },
+						{ text: 'ETH', callback_data: 'ETH' },
+					],
+				],
+			}),
+		};
+		bot.answerCallbackQuery(cb.id).then(() => {
+			bot.sendMessage(
+				cb.message.chat.id,
+				'Please select the coin you want to track.',
+				opts
+			);
+		});
+	};
 
-ws.on('message', (data) => {
-	if (data) {
-		const result = JSON.parse(data);
-		const price = result.p;
-		const wsToken = result.s;
+	if (content === 'BTC' || content === 'ETH') {
+		const token = content;
+		const opts = {
+			reply_markup: JSON.stringify({
+				inline_keyboard: [
+					[
+						{ text: 'Above', callback_data: token + 'above' },
+						{ text: 'Below', callback_data: token + 'below' },
+					],
+					[{ text: 'Go back', callback_data: 'go-back' }],
+				],
+			}),
+		};
 
-		for (token in tokenTarget) {
-			const direction = target[token][0];
-			const targetPrice = target[token][1];
+		bot.answerCallbackQuery(cb.id).then(() => {
+			bot.sendMessage(
+				cb.message.chat.id,
+				`Target ${token} above or below a certain price?`,
+				opts
+			);
+		});
+	} else if (content.slice(3) === 'above' || content.slice(3) === 'below') {
+		const direction = content.slice(3);
+		const token = content.slice(0, 3);
 
-			if (wsToken === token) {
-				if (direction == 'above' && price > targetPrice) {
-					bot.sendMessage(globalChatId, `🚀 ${token} price is above ${targetPrice}!`);
-					delete tokenTarget[token];
-				} else if ((direction = 'below' && price < targetPrice)) {
-					bot.sendMessage(
-						globalChatId,
-						`🔻️ ${token} price is below ${targetPrice}!`
-					);
-					delete tokenTarget[token];
+		bot.answerCallbackQuery(cb.id).then(() => {
+			bot.sendMessage(
+				cb.message.chat.id,
+				`Please input your target price for ${token}.`
+			);
+
+			bot.once('message', (msg, data) => {
+				const targetPrice = msg.text;
+				// check input is number
+				if (isNaN(targetPrice)) {
+					bot.sendMessage(msg.chat.id, 'Please input valid number');
+					initial();
+				} else {
+					trackTokenPrice(msg.chat.id, token, direction, targetPrice);
 				}
-			}
-		}
+			});
+		});
+	} else if (content === 'go-back') {
+		initial();
 	}
 });
+
+const trackTokenPrice = (chatId, token, direction, targetPrice) => {
+	const numTargetPrice = parseFloat(targetPrice);
+	const sentence =
+		'🚨 Alert when ' + token + ' is ' + direction + ' $' + targetPrice;
+	bot.sendMessage(chatId, sentence);
+
+	alertsRecord.push([token, direction, '$' + targetPrice]);
+
+	const ticker = token + 'USDT';
+  // once the price reach target, cancel the alert afterwards
+	let receiveWs = true;
+	
+	binanceClient.ws.trades(ticker, (data) => {
+		const price = parseFloat(data.price);
+    
+		if (receiveWs && direction === 'above' && price > numTargetPrice) {
+			receiveWs = false;
+			bot.sendMessage(chatId, `🚀 ${ticker} is above $ ${targetPrice}!`);
+      alertsRecord = alertsRecord.filter(record => { return record[0]!==token})
+		} else if (receiveWs && direction === 'below' && price < numTargetPrice) {
+			receiveWs = false;
+			bot.sendMessage(chatId, `🔻️ ${ticker} is below $ ${targetPrice}!`);
+      alertsRecord = alertsRecord.filter(record => { return record[0]!==token})
+		}
+	});
+};
+
