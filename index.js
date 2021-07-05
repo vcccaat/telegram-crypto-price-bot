@@ -3,6 +3,8 @@ const TelegramBot = require('node-telegram-bot-api');
 const Binance = require('binance-api-node').default;
 const Agent = require('socks5-https-client/lib/Agent');
 const packageInfo = require('./package.json');
+const redis = require('redis');
+const redisClient = redis.createClient(process.env.REDIS_URL);
 
 require('dotenv').config();
 
@@ -67,7 +69,10 @@ bot.on('message', (msg) => {
 		case '/start':
 			bot.sendMessage(
 				chatId,
-				`Instructions\n\n🔹 /price BTC      check current price \n\n🔹 /target     set a price alert \n\n🔹 /alerts      display all active alerts`
+				`🔹 /price TOKEN\n
+        - To check for the latest price, e.g. /price BTC\n\n🔹 /target\n
+        - Follow the instructions to set a price alert for BTC or ETH\n\n🔹 /alerts\n
+        - Display active alerts set by a user`
 			);
 			break;
 
@@ -89,17 +94,41 @@ bot.on('message', (msg) => {
 			);
 			break;
 		case '/alerts': //check active alerts
-			let record = ``;
-			for (r of alertsRecord) {
-				record += `🔴 Target `;
-				for (item of r) {
-					record += item + ` `;
+			// let record = ``;
+
+			// for (r of alertsRecord) {
+			// 	record += `🔴 Target `;
+			// 	for (item of r) {
+			// 		record += item + ` `;
+			// 	}
+			// 	record += `\n\n`;
+			// }
+			// if (record) {
+			// 	bot.sendMessage(chatId, record);
+			// }
+
+			redisClient.keys('*', (err, res) => {
+        console.log('alerts==',res)
+				const alerts = res;
+				let record = ``;
+				for (i of alerts) {
+					redisClient.hgetall(i, (err, res) => {
+            console.log('each alert==',res)
+						const line =
+							`🔴 Alert when ` +
+							res['token'] +
+							' is ' +
+							res['direction'] +
+							' $' +
+							res['targetPrice'] +
+							'\n\n';
+						record += line;
+					});
 				}
-				record += `\n\n`;
-			}
-			if (record) {
-				bot.sendMessage(chatId, record);
-			}
+				if (record) {
+					bot.sendMessage(chatId, record);
+				}
+			});
 
 		default:
 			break;
@@ -125,8 +154,7 @@ bot.onText(/\/price (.+)/, (msg, data) => {
 		);
 });
 
-let alertsRecord = [];
-
+// let alertsRecord = [];
 
 // inline button callback
 bot.on('callback_query', (cb) => {
@@ -190,6 +218,12 @@ bot.on('callback_query', (cb) => {
 					initial();
 				} else {
 					trackTokenPrice(msg.chat.id, token, direction, targetPrice);
+					redisClient.hset(
+						msg.message.message_id,
+						token,
+						direction,
+						targetPrice
+					);
 				}
 			});
 		});
@@ -200,28 +234,49 @@ bot.on('callback_query', (cb) => {
 
 const trackTokenPrice = (chatId, token, direction, targetPrice) => {
 	const numTargetPrice = parseFloat(targetPrice);
-	const sentence =
-		'🚨 Alert when ' + token + ' is ' + direction + ' $' + targetPrice;
-	bot.sendMessage(chatId, sentence);
 
-	alertsRecord.push([token, direction, '$' + targetPrice]);
+	// alertsRecord.push([token, direction, '$' + targetPrice]);
+	redisClient.hset(
+		token + direction + targetPrice,
+		'token',
+		token,
+		'direction',
+		direction,
+		'targetPrice',
+		targetPrice,
+		(err, res) => {
+			const sentence =
+				'🚨 Alert when ' + token + ' is ' + direction + ' $' + targetPrice;
+			bot.sendMessage(chatId, sentence);
+      
+		}
+	);
 
 	const ticker = token + 'USDT';
-  // once the price reach target, cancel the alert afterwards
+	// once the price reach target, cancel the alert afterwards
 	let receiveWs = true;
-	
+
 	binanceClient.ws.trades(ticker, (data) => {
 		const price = parseFloat(data.price);
-    
+
 		if (receiveWs && direction === 'above' && price > numTargetPrice) {
 			receiveWs = false;
 			bot.sendMessage(chatId, `🚀 ${ticker} is above $ ${targetPrice}!`);
-      alertsRecord = alertsRecord.filter(record => { return record[0]!==token})
+			//
+			// alertsRecord = alertsRecord.filter((record) => {
+			// 	return record[0] !== token;
+			// });
+			//
+			redisClient.del(token + 'above' + data.price);
 		} else if (receiveWs && direction === 'below' && price < numTargetPrice) {
 			receiveWs = false;
 			bot.sendMessage(chatId, `🔻️ ${ticker} is below $ ${targetPrice}!`);
-      alertsRecord = alertsRecord.filter(record => { return record[0]!==token})
+			//
+			// alertsRecord = alertsRecord.filter((record) => {
+			// 	return record[0] !== token;
+			// });
+			//
+			redisClient.del(token + 'below' + data.price);
 		}
 	});
 };
-
