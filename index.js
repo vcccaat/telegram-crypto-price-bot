@@ -218,12 +218,6 @@ bot.on('callback_query', (cb) => {
 					initial();
 				} else {
 					trackTokenPrice(msg.chat.id, token, direction, targetPrice);
-					redisClient.hset(
-						msg.message.message_id,
-						token,
-						direction,
-						targetPrice
-					);
 				}
 			});
 		});
