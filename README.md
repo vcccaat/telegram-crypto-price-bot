@@ -7,7 +7,7 @@ Try the bot at https://telegram.me/CryptoTargetPriceBot.
 **Usage**
 
 🔹 /price TOKEN   
-- To check for the latest price, e.g. /price BTC
+- Check the latest price, e.g. /price BTC
 
 🔹 /target      
 - Follow the instructions to set a price alert for BTC or ETH
@@ -15,12 +15,18 @@ Try the bot at https://telegram.me/CryptoTargetPriceBot.
 🔹 /alerts      
 - Display active alerts set by a user
 
+🔹 /clearall
+- Clear all active alerts set by a user
+
+🔹 /clear TOKEN DIRECTION PRICE
+- Remove a specific alert set by a user, e.g. /clear ETH above 2000
+
 
 # Features
 * Get the latest crypto price on Binance via websocket 
 * Apply webhook to listen requests with the update data from telegram, instead of using polling to check for updates every few seconds
 * Embed inline callback buttons to make easy bot-user interation with a simple click
-* Redis database to store state data for each user
+* Promisify redis to avoid nested callbacks and make it easier to get the result return from the callback
 
 
 # How to run
