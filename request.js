@@ -84,15 +84,14 @@ module.exports = {
       if (receiveWs && direction === 'above' && price > numTargetPrice) {
         receiveWs = false;
         bot.sendMessage(chatId, `🚀 ${ticker} is above $ ${targetPrice}!`);
-        del(token + 'above' + data.price);
+        del(token + 'above' + targetPrice);
       } else if (receiveWs && direction === 'below' && price < numTargetPrice) {
         receiveWs = false;
         bot.sendMessage(chatId, `🔻️ ${ticker} is below $ ${targetPrice}!`);
-        del(token + 'below' + data.price);
+        del(token + 'below' + targetPrice);
       }
     });
   }
-
 };
 
 
