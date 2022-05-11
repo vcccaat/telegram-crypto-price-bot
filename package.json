@@ -19,6 +19,6 @@
 		"socks5-https-client": "^1.2.1"
 	},
 	"devDependencies": {
-		"node-fetch": "^2.6.1"
+		"node-fetch": "^2.6.7"
 	}
 }
